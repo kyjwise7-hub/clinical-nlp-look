@@ -1,0 +1,19 @@
+# 환자 데이터 보안
+*.csv
+*.parquet
+*.json
+*.jsonl
+*patient*
+*subject*
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.egg-info/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
