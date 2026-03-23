@@ -1,3 +1,13 @@
+> **📢 팀 프로젝트 안내**
+> 이 프로젝트는 오라클 아카데미 6인 팀으로 개발한 감염병 모니터링 시스템 **LOOK**의 NLP 모듈입니다.
+> 팀 공용 레포는 Private이므로, 본 레포에 제가 담당한 코드·설계문서·실험결과를 별도로 정리했습니다.
+>
+> - 🏥 **전체 시스템**: WATCH(위험 필터링) → EXPLAIN(타임라인·AI 요약·Sepsis ML) → ACT(병상배치·체크리스트·RAG·문서자동화)
+> - 🧑‍💻 **나의 역할**: AI Researcher · Data Scientist
+> - 👥 **팀 구성**: 총 6명 (ML 2명, NLP 2명, Frontend 1명, Backend 1명)
+
+---
+
 # 🔬 LOOK — 의료 문서 기반 감염병 모니터링 NLP 파이프라인
 
 **팀 프로젝트 | 2024 | F1 0.86**
@@ -68,6 +78,18 @@ Parser         Extractor         NER           Validation       & Trajectory Eve
 
 ---
 
+## 🎯 나의 주요 기여
+
+| 영역 | 상세 |
+|------|------|
+| NLP 파이프라인 설계 | 5단계 구조 (Document Parser → Rule-Based Extractor → KM-BERT NER → Norm & Validation → Axis Snapshot & Trajectory) |
+| 합성데이터 설계 | MIMIC-IV 10명 + 순수합성 3명 = 13명, 558개 문서, 52종 슬롯 |
+| 정보추출 로직 | KM-BERT NER + Rule-Based 하이브리드 방식 구현 |
+| 성능 | 전체 F1 0.86 달성 |
+| 현장 검증 | 의료진 5명 평가 — 환자안전 기여 100%, 도입의향 80% |
+
+---
+
 ## 📁 프로젝트 구조
 
 ```
@@ -111,3 +133,10 @@ MIMIC-IV 기반 데이터는 PhysioNet DUA 계약에 따라 원본 재배포가 
 
 - GitHub: [kyjwise7-hub](https://github.com/kyjwise7-hub)
 - Portfolio: [kyjwise7.oopy.io](https://kyjwise7.oopy.io)
+
+---
+
+## 🔗 관련 프로젝트
+
+LOOK의 Sepsis ML 모듈은 아래 미니프로젝트에서 시작되어 발전한 것입니다.
+→ [mimic-iv-deterioration-prediction](https://github.com/kyjwise7-hub/mimic-iv-deterioration-prediction)
