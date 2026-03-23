@@ -4,7 +4,7 @@
 >
 > - **전체 시스템**: WATCH(위험 필터링) → EXPLAIN(타임라인·AI 요약·Sepsis ML) → ACT(병상배치·체크리스트·RAG·문서자동화)
 > -  **참여**: AI Researcher · Data Scientist
-> - 👥 **팀 구성**: 총 6명 (ML 2명, NLP 2명, Frontend 1명, Backend 1명)
+> -  **팀 구성**: 총 6명 (ML/NLP 2명, 기획/Frontend 2명, Backend 1명, 총괄 1명)
 
 ---
 
