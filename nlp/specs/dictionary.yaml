@@ -1,0 +1,824 @@
+# dictionary_v1_2.yaml
+# INFECT-GUARD 슬롯 추출용 키워드/패턴 사전 (통합 v1.2)
+# ──────────────────────────────────────────────────────
+# 변경 이력:
+#   v1.0  2026-01-29  초기 버전 (키워드+패턴)
+#   v1.2  2026-02-10  detection_dictionary 통합, slot_definition 정렬,
+#                     SFTS/Cluster 카테고리 추가, Axis E 격리 슬롯 보강
+# ──────────────────────────────────────────────────────
+# 사용처:
+#   - rule_extractor.py  → 정규식 패턴 + 키워드 로드
+#   - dictionary_matcher.py → detection_categories 1차 필터
+#   - context_tagger.py  → common_context 로드
+# ──────────────────────────────────────────────────────
+
+version: "1.2"
+last_updated: "2026-02-10"
+
+notes:
+  - "Keywords are extraction aids; final outputs must be normalized into slots."
+  - "Negation/uncertainty/plan/temporality tags apply across all document types."
+  - "detection_categories는 1차 필터용 — 매칭 시 해당 카테고리 상세 추출 시도"
+  - "patterns의 캡처 그룹 ()은 값 추출용, 없으면 존재 여부만 판정"
+
+
+# ================================================================
+# SECTION 1: COMMON CONTEXT (모든 문서 타입 공통)
+# ================================================================
+common_context:
+
+  negation:
+    en: ["no", "not", "without", "denies", "negative", "absent", "none", "deny", "denied"]
+    kr: ["없음", "아님", "부인", "음성", "(-)", "아니"]
+    patterns:
+      - "(?i)no\\s+(fever|cough|dyspnea|rash|diarrhea|vomiting|edema|effusion)"
+      - "(발열|기침|호흡곤란|설사|구토|부종|흉수)\\s*없"
+      - "(?i)(deny|denied|denies)\\s+\\w+"
+      - "(?i)no\\s+(active|acute)\\s+(lesion|infiltrate|effusion)"
+
+  uncertainty:
+    en: ["possible", "probable", "suspect", "concern for", "rule out", "r/o", "likely"]
+    kr: ["의심", "가능성", "배제 필요", "추정", "~일 수 있"]
+    patterns:
+      - "(?i)(possible|probable|r/o|rule\\s*out|suspect|likely|concern\\s*for)"
+      - "(의심|가능성|추정|배제)"
+
+  plan:
+    en: ["plan", "planned", "recommend", "will", "consider", "pending"]
+    kr: ["예정", "권고", "고려", "계획"]
+    patterns:
+      - "(?i)(plan|will|consider)\\s+to"
+      - "(예정|고려|계획)"
+
+  temporality:
+    en: ["today", "yesterday", "since", "interval", "compared to prior", "previous"]
+    kr: ["입원", "오늘", "어제", "이전", "대비"]
+    patterns:
+      - "(?i)(today|yesterday|since\\s+\\w+)"
+      - "D\\s*[+-]?\\s*[0-9]+"
+      - "(입원|오늘|어제)"
+
+
+# ================================================================
+# SECTION 2: DETECTION CATEGORIES (질환별 1차 감지 필터)
+# ================================================================
+# 출처: 합성_데이터_detection_dictionary
+# 용도: 텍스트에 해당 키워드가 1개 이상 있으면 해당 카테고리 활성화
+#       → 관련 슬롯 상세 추출 시도
+
+detection_categories:
+
+  mdro:
+    description: "다제내성균 - 즉시 격리 대상"
+    source_docs: [microbiology]
+    target_slots: [mdro_flag, organism, isolation_required, resistance_detected]
+    keywords:
+      organisms: ["VRE", "CRE", "MRSA", "VRSA", "CPE", "ESBL"]
+      resistance: ["Resistant", "Resistance", "Intermediate", "Positive"]
+      kr: ["다제내성", "양성", "검출됨", "내성"]
+      enzymes: ["Carbapenemase", "KPC", "NDM"]
+
+  pneumonia:
+    description: "폐렴 악화 - 전원 의뢰 대상"
+    source_docs: [radiology, nursing_note]
+    target_slots: [cxr_severity, cxr_lesion_type, cxr_location, dyspnea, work_of_breathing, sputum_character]
+    keywords:
+      findings: ["Consolidation", "Infiltration", "Opacity", "Hazy", "Effusion"]
+      worsening: ["Worsening", "Increased", "Aggravated", "New lesion"]
+      symptoms: ["Desaturation", "SpO2", "Crackle", "Dyspnea"]
+      sputum: ["Purulent", "Yellowish", "Thick sputum", "Greenish", "blood-tinged"]
+      kr: ["경화", "침윤", "폐침윤", "흉수", "농성 객담", "누런 가래", "혈담"]
+
+  uti:
+    description: "요로감염 - 고령 환자 주의"
+    source_docs: [nursing_note, microbiology, lab_result]
+    target_slots: [specimen_type, culture_result, organism, foley_catheter]
+    keywords:
+      lab_markers: ["Pyuria", "Nitrite", "Turbid"]
+      symptoms: ["dysuria", "hematuria", "oliguria"]
+      kr: ["배뇨통", "잔뇨감", "혈뇨", "탁한 소변", "소변 혼탁"]
+      risk_factors: ["Foley", "Catheter", "Self voiding fail"]
+      organisms: ["E.coli", "Enterococcus", "Enterococcus faecium", "Proteus", "Klebsiella"]
+
+  tick_borne:
+    description: "진드기 매개 감염 (쯔쯔가무시) - 지방 병원 특화"
+    source_docs: [nursing_note, physician_note]
+    target_slots: [tick_eschar, tick_exposure, diagnosis_mentioned]
+    keywords:
+      skin: ["가피", "slough", "crust", "black crust", "Eschar", "inoculation eschar", "bite mark", "물린 자국", "검은 딱지", "발진"]
+      exposure: ["밭일", "농사", "성묘", "야외", "야외 작업", "등산", "밤 줍기", "풀숲", "야외활동", "hiking", "outdoor farming", "tick-borne"]
+      vector: ["진드기", "벌레", "tick bite"]
+      symptoms: ["고열", "오한", "두통"]
+      diagnosis: ["쯔쯔가무시", "tsutsugamushi"]
+
+  sfts:
+    description: "SFTS (중증열성혈소판감소증후군) - 치명률 높은 진드기 감염"
+    source_docs: [lab_result, nursing_note, physician_note]
+    target_slots: [platelet_value, wbc_value, ast_value, alt_value, tick_eschar, tick_exposure]
+    keywords:
+      lab_markers: ["Thrombocytopenia", "혈소판 감소", "Plt", "Leukopenia", "AST/ALT 상승"]
+      skin: ["가피", "Eschar", "물린 자국"]
+      exposure: ["밭일", "농사", "야외활동", "진드기", "작은소참진드기"]
+      symptoms: ["고열", "소화기 증상", "설사", "구토", "복통", "의식저하"]
+      severe: ["출혈 경향", "DIC", "MOF", "쇼크", "혼미"]
+      diagnosis: ["SFTS", "중증열성혈소판감소증후군"]
+
+  cluster:
+    description: "집단 감염 조짐 - 병동 감시"
+    source_docs: [nursing_note, microbiology]
+    target_slots: [cluster_suspected, diarrhea, nausea_vomiting]
+    keywords:
+      gi: ["설사", "Diarrhea", "구토", "Vomiting", "Nausea"]
+      stool: ["Watery", "Loose stool", "물설사", "점액변"]
+      skin_cluster: ["Scabies", "옴", "가려움"]
+      multi_patient: ["cluster", "same organism", "outbreak", "another patient"]
+      kr: ["집단 발생", "동일균"]
+
+
+# ================================================================
+# SECTION 3: NURSING NOTE (간호기록)
+# ================================================================
+nursing_note:
+
+  # ---- 호흡 상태 (Axis A) ----
+  spo2:
+    slot: spo2_value
+    keywords:
+      en: ["SpO2", "O2 sat", "saturation", "desat", "desaturation"]
+      kr: ["산소포화도", "저산소"]
+    patterns:
+      - "(?i)sp\\s*o\\s*2\\s*:?\\s*(\\d{2,3})\\s*%?"
+      - "산소포화도\\s*:?\\s*(\\d{2,3})"
+
+  o2_device:
+    slot: o2_device
+    keywords: ["RA", "room air", "NC", "nasal cannula", "VM", "Venturi", "SM", "simple mask", "NRM", "HFNC"]
+    normalize:
+      room air: "RA"
+      nasal cannula: "NC"
+      NC: "NC"
+      VM: "VM"
+      Venturi: "VM"
+      SM: "SM"
+      simple mask: "SM"
+      NRM: "NRM"
+      HFNC: "HFNC"
+
+  o2_flow:
+    slot: o2_flow_lpm
+    patterns:
+      - "(?i)(NC|VM|SM|NRM|HFNC)\\s*(\\d{1,2})\\s*L"
+      - "(?i)O2\\s*(\\d{1,2})\\s*L"
+
+  o2_action:
+    slot: resp_support_event
+    keywords:
+      en: ["O2 apply", "O2 start", "flow up", "increase", "weaning", "O2 off"]
+      kr: ["산소 적용", "산소 시작", "증량", "감량", "산소 중단"]
+    patterns:
+      - "(?i)o2\\s*(apply|start|off)"
+      - "(산소|O2)\\s*(적용|시작|증량|감량|중단)"
+      - "(\\d+)\\s*L\\s*→\\s*(\\d+)\\s*L"
+    normalize:
+      apply: "start"
+      start: "start"
+      시작: "start"
+      적용: "start"
+      증량: "increase"
+      감량: "decrease"
+      중단: "stop"
+      off: "stop"
+
+  work_of_breathing:
+    slot: work_of_breathing
+    keywords:
+      en: ["tachypnea", "dyspnea", "labored", "accessory muscle", "nasal flaring"]
+      kr: ["빈호흡", "호흡곤란", "노력호흡", "숨 가쁨", "비익호흡"]
+    severity:
+      severe: ["노력호흡", "비익호흡", "accessory muscle", "nasal flaring"]
+      moderate: ["tachypnea", "빈호흡", "labored"]
+      mild: ["mild dyspnea", "약간 호흡곤란"]
+
+  breath_sounds:
+    slot: breath_sounds
+    keywords:
+      en: ["crackles", "rales", "rhonchi", "wheezing", "diminished"]
+      kr: ["수포음", "천명음", "호흡음 감소"]
+
+  sputum:
+    slot: sputum_character
+    keywords:
+      en: ["purulent", "yellowish", "greenish", "thick sputum", "blood-tinged"]
+      kr: ["농성 객담", "누런 가래", "혈담"]
+
+  # ---- 호흡곤란 (Axis A) ----
+  dyspnea:
+    slot: dyspnea
+    keywords:
+      en: ["dyspnea", "SOB", "breathlessness", "short of breath"]
+      kr: ["호흡곤란", "숨참", "숨 가쁨"]
+    patterns:
+      - "(?i)(dyspnea|SOB|breathless)"
+      - "(호흡곤란|숨참)"
+
+  # ---- 임상 행동 (Axis C) ----
+  notify:
+    slot: notify_mentioned
+    keywords:
+      en: ["notify", "notified", "reported", "called"]
+      kr: ["보고", "노티", "연락", "Dr notify함"]
+    patterns:
+      - "(?i)Dr\\.?\\s*notify"
+      - "notify함\\s*(\\d+)\\s*회"
+      - "(보고|노티).{0,3}(함|완료)"
+      - "\\*\\*\\s*담당의\\s*notify\\s*함?\\s*\\*\\*"
+
+  monitoring:
+    slot: vitals_frequency
+    keywords:
+      en: ["q1h", "q2h", "q4h", "close monitoring"]
+      kr: ["집중 관찰", "자주 체크"]
+    patterns:
+      - "(?i)q\\s*([12468])\\s*h"
+      - "(집중|강화)\\s*관찰"
+    normalize:
+      1: "q1h"
+      2: "q2h"
+      4: "q4h"
+      8: "q8h"
+
+  prn_intervention:
+    slot: prn_interventions
+    keywords:
+      en: ["suction", "nebulizer", "neb", "antipyretic", "IV fluid", "bolus"]
+      kr: ["석션", "네뷸라이저", "해열제", "수액"]
+    patterns:
+      - "(해열제|수액|bolus).{0,5}(시행|투여|함)"
+
+  monitoring_level:
+    slot: monitoring_level
+    keywords:
+      en: ["standard monitoring", "enhanced monitoring", "intensive monitoring", "close monitoring"]
+      kr: ["일반 관찰", "강화 관찰", "집중 관찰", "집중 모니터링"]
+    normalize:
+      standard: "standard"
+      enhanced: "enhanced"
+      intensive: "intensive"
+      close: "enhanced"
+
+  intake_output:
+    slot: intake_output_monitoring
+    keywords:
+      en: ["I/O", "intake output", "fluid balance", "urine output"]
+      kr: ["섭취량/배설량", "I/O 체크", "수분 균형", "소변량"]
+    patterns:
+      - "(?i)I\\s*/\\s*O"
+      - "(?i)intake.{0,5}output"
+      - "섭취량.{0,5}배설량"
+
+  # ---- 격리 시점 (Axis E) ----
+  isolation_timing:
+    slots: [isolation_start_time, isolation_end_time]
+    keywords:
+      en: ["isolation started", "isolation ended", "isolation removed", "isolation discontinued"]
+      kr: ["격리 시작", "격리 해제", "격리 종료"]
+    patterns:
+      - "격리\\s*(시작|해제|종료)"
+      - "(?i)isolation\\s*(start|end|remov|discontinu)"
+
+  # ---- 감염 징후 ----
+  fever_chills:
+    slot: fever_present
+    keywords:
+      en: ["fever", "febrile", "chills", "rigors"]
+      kr: ["발열", "열", "고열", "오한"]
+    patterns:
+      - "(3[89]|40)\\.?\\d*\\s*(도|℃)"
+      - "(발열|고열|오한)"
+
+  pain:
+    slot: pain_nrs_value
+    keywords:
+      en: ["NRS", "pain score", "pain scale", "VAS", "numeric rating"]
+      kr: ["통증", "통증점수", "동통", "압통", "쑤심", "살살 아파"]
+    patterns:
+      - "(?i)(?:NRS|pain\\s*(?:score|scale)?|통증)\\s*:?\\s*(\\d{1,2})\\s*/\\s*10"
+      - "(?i)(\\d{1,2})\\s*/\\s*10\\s*(?:\\(NRS\\)|\\(VAS\\))?"
+      - "통증\\s*(\\d{1,2})\\s*점"
+      - "(?i)NRS\\s*(\\d{1,2})"
+    range: [0, 10]
+
+  pain_location:
+    slot: pain_location_hint
+    keywords:
+      en: ["abdominal pain", "flank pain", "back pain", "chest pain", "headache", "suprapubic"]
+      kr: ["복통", "옆구리 통증", "허리 통증", "두통", "흉통", "하복부 통증"]
+    patterns:
+      - "(?i)(abdominal|flank|back|chest|suprapubic|epigastric|RLQ|LLQ|RUQ|LUQ)\\s*pain"
+      - "(복통|옆구리|허리|두통|흉통|하복부|상복부)\\s*(통증|아파|쑤시|불편)"
+    normalize:
+      abdominal: "abdomen"
+      flank: "flank"
+      back: "back"
+      chest: "chest"
+      suprapubic: "suprapubic"
+      epigastric: "epigastric"
+      복통: "abdomen"
+      옆구리: "flank"
+      허리: "back"
+      두통: "head"
+      흉통: "chest"
+      하복부: "suprapubic"
+      상복부: "epigastric"
+
+  gi_symptoms:
+    slots: [diarrhea, nausea_vomiting]
+    keywords:
+      en: ["diarrhea", "loose stool", "watery", "vomiting", "nausea"]
+      kr: ["설사", "물설사", "구토", "오심", "점액변"]
+    patterns:
+      - "(설사|구토)\\s*(\\d+)\\s*(회|번)"
+
+  urinary_symptoms:
+    slot: urinary_symptoms_present
+    keywords:
+      en: ["dysuria", "hematuria", "turbid", "oliguria"]
+      kr: ["배뇨통", "혈뇨", "탁한 소변", "잔뇨감", "소변 혼탁"]
+
+  foley_catheter:
+    slot: foley_catheter
+    keywords:
+      en: ["Foley", "catheter", "self voiding fail"]
+      kr: ["소변줄", "유치도뇨관"]
+    patterns:
+      - "(?i)Foley\\s*(catheter)?\\s*(\\d+)?\\s*(Fr)?"
+
+  # ---- 중증 관찰 ----
+  mental_status:
+    slot: altered_mentation
+    keywords:
+      en: ["AMS", "confusion", "drowsy", "stupor"]
+      kr: ["의식저하", "혼미", "기면", "지남력 저하"]
+
+  hemodynamic:
+    slot: hemodynamic_instability
+    keywords:
+      en: ["hypotension", "BP drop", "tachycardia", "shock"]
+      kr: ["저혈압", "혈압 저하", "빈맥", "쇼크"]
+
+  # ---- 진드기 관련 ----
+  tick_borne_skin:
+    slot: tick_eschar
+    keywords:
+      en: ["eschar", "inoculation eschar", "slough", "crust", "black crust", "bite mark", "rash"]
+      kr: ["가피", "검은 딱지", "물린 자국", "발진"]
+    patterns:
+      - "(가피|딱지).{0,5}(발견|관찰)"
+      - "(?i)eschar"
+
+  tick_borne_exposure:
+    slot: tick_exposure
+    keywords:
+      en: ["outdoor", "hiking", "farming", "outdoor farming", "tick bite", "tick-borne"]
+      kr: ["밭일", "농사", "풀숲", "야외활동", "야외 작업", "등산", "성묘", "진드기", "밤 줍기"]
+    patterns:
+      - "(밭일|농사|야외).{0,5}(다녀|하셨)"
+      - "진드기.{0,5}(물림|물린)"
+
+  # ---- 격리 상태 (Axis E) ----
+  isolation_status:
+    slots: [isolation_required, isolation_applied]
+    keywords:
+      en: ["isolation apply", "contact isolation", "isolation not applied", "droplet precaution", "airborne precaution"]
+      kr: ["격리 적용", "격리 시행", "격리 아직", "병실 이동", "격리 필요"]
+    patterns:
+      - "(?i)(contact|droplet|airborne)\\s*(isolation|precaution)"
+      - "(?i)isolation\\s*(apply|적용|시행)"
+      - "격리\\s*(아직|안됨|미시행)"
+
+  # ---- 바이탈 사인 전체 패턴 ----
+  vital_signs:
+    slots: [bp_sys, bp_dia, hr_value, rr_value, temp_value, spo2_value]
+    patterns:
+      - "V/S\\s*\\)?\\s*:?\\s*(\\d{2,3})/(\\d{2,3})\\s*-\\s*(\\d{2,3})\\s*-\\s*(\\d{2,3})\\s*-\\s*([\\d.]+)\\s*-?\\s*(\\d{2,3})%?"
+
+
+# ================================================================
+# SECTION 4: RADIOLOGY CXR (CXR 판독문)
+# ================================================================
+radiology_cxr:
+
+  finding_type:
+    slot: cxr_lesion_type
+    alveolar:
+      en: ["consolidation", "airspace opacity", "infiltration", "hazy"]
+      kr: ["경화", "침윤", "폐침윤"]
+    pleural:
+      en: ["effusion", "pleural effusion", "blunting", "pleural thickening"]
+      kr: ["흉수", "늑막삼출"]
+    airway:
+      en: ["atelectasis", "pneumothorax", "pulmonary edema", "cardiomegaly"]
+      kr: ["무기폐", "기흉", "폐부종", "심비대"]
+
+  location:
+    slot: cxr_location
+    lobes: ["RUL", "RML", "RLL", "LUL", "LLL", "lingula"]
+    distribution:
+      en: ["bilateral", "both", "diffuse", "perihilar", "patchy", "focal", "multifocal"]
+      kr: ["양측", "미만성"]
+    normalize:
+      right upper lobe: "RUL"
+      right middle lobe: "RML"
+      right lower lobe: "RLL"
+      left upper lobe: "LUL"
+      left lower lobe: "LLL"
+      bilateral: "bilateral"
+      both: "bilateral"
+
+  severity:
+    slot: cxr_severity
+    mild: ["mild", "minimal", "faint", "subtle", "경도"]
+    moderate: ["moderate", "중등도"]
+    severe: ["severe", "marked", "extensive", "중증", "심한"]
+
+  extent:
+    slot: cxr_extent
+    terms: ["focal", "patchy", "multifocal", "diffuse", "subsegmental", "segmental"]
+
+  comparison:
+    slot: cxr_change_direction
+    worsening:
+      en: ["worsening", "increased", "aggravated", "progressed", "new"]
+      kr: ["악화", "증가", "신규 병변"]
+    improving:
+      en: ["improved", "decreased", "resolved", "clearing"]
+      kr: ["호전", "감소"]
+    stable:
+      en: ["stable", "no interval change", "unchanged"]
+      kr: ["변화 없음"]
+
+  negative_findings:
+    keywords:
+      en: ["clear", "no active lesion", "unremarkable", "normal"]
+      kr: ["깨끗", "이상 없음"]
+    patterns:
+      - "(?i)no\\s+(active|acute)\\s+(lesion|infiltrate|effusion)"
+
+
+# ================================================================
+# SECTION 5: MICROBIOLOGY (미생물 배양)
+# ================================================================
+microbiology:
+
+  organism:
+    slot: organism
+    mdro: ["VRE", "CRE", "MRSA", "VRSA", "CPE", "ESBL", "Carbapenemase", "KPC", "NDM"]
+    respiratory: ["Streptococcus pneumoniae", "Klebsiella pneumoniae", "Pseudomonas aeruginosa", "Acinetobacter baumannii"]
+    gi: ["C.diff", "C.difficile", "Norovirus", "Salmonella", "Shigella"]
+    uti: ["E.coli", "Enterococcus", "Enterococcus faecium", "Proteus", "Klebsiella"]
+
+  specimen_type:
+    slot: specimen_type
+    keywords: ["blood culture", "urine culture", "sputum culture", "stool culture", "wound culture"]
+    patterns:
+      - "(?i)(blood|urine|sputum|stool|wound)\\s*(culture|Cx|배양)"
+    normalize:
+      blood culture: "blood"
+      urine culture: "urine"
+      sputum culture: "sputum"
+      stool culture: "stool"
+      wound culture: "wound"
+
+  test_status:
+    slot: culture_result
+    positive:
+      en: ["isolated", "detected", "growth", "positive", "identified"]
+      kr: ["검출", "양성", "동정됨", "분리됨"]
+      patterns:
+        - "(?i)(isolated|detected|growth|positive)"
+    negative:
+      en: ["no growth", "negative", "not detected", "sterile"]
+      kr: ["음성", "미검출"]
+      patterns:
+        - "(?i)no\\s*growth"
+    pending:
+      en: ["pending", "in progress", "collected"]
+
+  resistance:
+    slot: resistance_detected
+    markers: ["Resistant", "R", "Intermediate", "I", "Sensitive", "S"]
+    patterns:
+      - "(?i)(Resistant|R)\\s*(to)?\\s*(vancomycin|oxacillin|carbapenem|meropenem|ampicillin)"
+
+  colony_count:
+    slot: colony_count
+    keywords: ["colony count", "growth", "CFU"]
+    patterns:
+      - "(?i)(heavy|moderate|light|scanty)\\s*growth"
+      - "(?i)([0-9]+)\\s*CFU"
+
+  susceptibility:
+    slot: susceptibility_list
+    keywords: ["susceptibility", "sensitivity", "AST", "감수성"]
+    patterns:
+      - "(?i)(susceptibility|sensitivity)\\s*(test|result)?"
+
+  mdro_status:
+    slot: mdro_status
+    keywords:
+      en: ["suspected MDRO", "confirmed MDRO", "MDRO cleared"]
+      kr: ["다제내성 의심", "다제내성 확인", "다제내성 해제"]
+    patterns:
+      - "(?i)MDRO\\s*(suspected|confirmed|cleared)"
+
+  gram_stain:
+    slot: gram_stain
+    keywords: ["Gram stain", "그람 염색"]
+    note: "structured field (gram_stain) — 구조화 필드 매핑 우선, 텍스트에서도 추출 가능"
+
+  collection_time:
+    slot: collection_time
+    note: "structured field (collection_datetime) — 텍스트 추출 불필요, 구조화 필드 매핑 전용"
+
+  result_time:
+    slot: result_time
+    note: "structured field (result_datetime) — 텍스트 추출 불필요, 구조화 필드 매핑 전용"
+
+  operational_event:
+    isolation_required:
+      slot: isolation_required
+      en: ["isolation required", "contact isolation", "droplet precaution", "airborne precaution"]
+      kr: ["격리 필요", "접촉격리", "비말격리", "공기격리"]
+      patterns:
+        - "(?i)(contact|droplet|airborne)\\s*(isolation|precaution)"
+    isolation_applied:
+      slot: isolation_applied
+      en: ["isolation applied", "isolation started"]
+      kr: ["격리 시행", "격리실 이동"]
+    cluster_hint:
+      slot: cluster_suspected
+      en: ["cluster", "same organism", "outbreak", "another patient"]
+      kr: ["집단 발생", "동일균"]
+      patterns:
+        - "(?i)another\\s*patient.*(same|VRE|MRSA)"
+    cluster_evidence:
+      slot: cluster_evidence
+      keywords:
+        en: ["same organism", "same ward", "time overlap", "room overlap", "same syndrome"]
+        kr: ["동일균", "같은 병동", "같은 시기", "동일 증후군"]
+    cohort:
+      slot: cohort_key
+      note: "computed: WARD_CODE|ORGANISM|ISOLATION_TYPE — 텍스트 추출 불필요, 운영 로직에서 생성"
+
+
+# ================================================================
+# SECTION 6: LABS (검사 수치)
+# ================================================================
+labs:
+
+  temp:
+    slot: temp_value
+    keywords: ["Temp", "Temperature", "BT", "체온"]
+    patterns:
+      - "(?i)(Temp|BT|체온)\\s*:?\\s*([0-9]{2}\\.?[0-9]?)"
+    unit: "℃"
+    normal_range: [36.0, 37.5]
+
+  wbc:
+    slot: wbc_value
+    keywords: ["WBC", "백혈구"]
+    patterns:
+      - "(?i)WBC\\s*:?\\s*([0-9]{1,3}\\.?[0-9]?)"
+    unit: "x10³/μL"
+    normal_range: [4.0, 10.0]
+    note: "14000 → 14.0으로 정규화 (x10³ 단위)"
+
+  crp:
+    slot: crp_value
+    keywords: ["CRP"]
+    patterns:
+      - "(?i)CRP\\s*:?\\s*([0-9]{1,3}\\.?[0-9]?)"
+    unit: "mg/dL"
+    normal_range: [0, 0.5]
+
+  platelet:
+    slot: platelet_value
+    keywords: ["PLT", "Platelet", "혈소판"]
+    patterns:
+      - "(?i)(PLT|Platelet|혈소판)\\s*:?\\s*([0-9]{2,3},?[0-9]*)"
+    unit: "x10³/μL"
+    normal_range: [150, 400]
+    note: "v1.2 필수급 — SFTS/진드기 감염 커버"
+
+  ast:
+    slot: ast_value
+    keywords: ["AST", "SGOT"]
+    patterns:
+      - "(?i)AST\\s*:?\\s*([0-9]{1,4})"
+    unit: "U/L"
+    normal_range: [0, 40]
+
+  alt:
+    slot: alt_value
+    keywords: ["ALT", "SGPT"]
+    patterns:
+      - "(?i)ALT\\s*:?\\s*([0-9]{1,4})"
+    unit: "U/L"
+    normal_range: [0, 40]
+
+  creatinine:
+    slot: creatinine_value
+    keywords: ["Cr", "Creatinine"]
+    patterns:
+      - "(?i)(Cr|Creatinine)\\s*:?\\s*([0-9]{1,2}\\.?[0-9]?)"
+    unit: "mg/dL"
+    normal_range: [0.6, 1.2]
+
+  lactate:
+    slot: lactate_value
+    keywords: ["Lactate", "젖산"]
+    patterns:
+      - "(?i)Lactate\\s*:?\\s*([0-9]{1,2}\\.?[0-9]?)"
+    unit: "mmol/L"
+    normal_range: [0, 2.0]
+
+  procalcitonin:
+    slot: procalcitonin_value
+    keywords: ["Procalcitonin", "PCT"]
+    patterns:
+      - "(?i)(Procalcitonin|PCT)\\s*:?\\s*([0-9]{1,3}\\.?[0-9]*)"
+    unit: "ng/mL"
+    normal_range: [0, 0.5]
+
+  hgb:
+    slot: hgb_value
+    keywords: ["Hgb", "Hemoglobin", "Hb", "혈색소"]
+    patterns:
+      - "(?i)(Hgb|Hemoglobin|Hb)\\s*:?\\s*([0-9]{1,2}\\.?[0-9]?)"
+    unit: "g/dL"
+    normal_range: [12.0, 17.0]
+
+  bun:
+    slot: bun_value
+    keywords: ["BUN", "Blood Urea Nitrogen"]
+    patterns:
+      - "(?i)BUN\\s*:?\\s*([0-9]{1,3}\\.?[0-9]?)"
+    unit: "mg/dL"
+    normal_range: [7, 20]
+
+  na:
+    slot: na_value
+    keywords: ["Na", "Sodium", "나트륨"]
+    patterns:
+      - "(?i)(Na|Sodium)\\s*:?\\s*([0-9]{3}\\.?[0-9]?)"
+    unit: "mEq/L"
+    normal_range: [136, 145]
+
+  k:
+    slot: k_value
+    keywords: ["K", "Potassium", "칼륨"]
+    patterns:
+      - "(?i)K\\s*:?\\s*([0-9]{1,2}\\.?[0-9]?)"
+    unit: "mEq/L"
+    normal_range: [3.5, 5.0]
+
+  glucose:
+    slot: glucose_value
+    keywords: ["Glucose", "Glu", "혈당", "BST"]
+    patterns:
+      - "(?i)(Glucose|Glu|BST|혈당)\\s*:?\\s*([0-9]{2,3})"
+    unit: "mg/dL"
+    normal_range: [70, 110]
+
+
+# ================================================================
+# SECTION 7: PHYSICIAN NOTE (의사 기록)
+# ================================================================
+physician_note:
+
+  diagnosis:
+    slot: diagnosis_mentioned
+    infectious: ["pneumonia", "CAP", "HAP", "UTI", "pyelonephritis", "sepsis", "bacteremia", "cellulitis"]
+    tick_borne: ["SFTS", "tsutsugamushi", "쯔쯔가무시", "중증열성혈소판감소증후군"]
+
+  antibiotic_event:
+    slot: abx_event
+    start:
+      en: ["start", "initiate", "begin", "empiric"]
+      kr: ["시작"]
+    change:
+      en: ["switch", "change to"]
+      kr: ["변경"]
+    escalate:
+      en: ["escalate", "broaden", "broad spectrum"]
+      kr: ["강화", "광범위"]
+    deescalate:
+      en: ["de-escalate", "narrow"]
+      kr: ["감량", "축소"]
+    stop:
+      en: ["stop", "discontinue", "D/C"]
+      kr: ["중단"]
+
+  antibiotic_names:
+    # rule_extractor에서 항생제 이름 매칭용
+    broad_spectrum: ["piperacillin-tazobactam", "meropenem", "imipenem", "doripenem"]
+    cephalosporin: ["ceftriaxone", "cefepime", "cefotaxime", "ceftazidime"]
+    glycopeptide: ["vancomycin", "teicoplanin"]
+    fluoroquinolone: ["ciprofloxacin", "levofloxacin", "moxifloxacin"]
+    other: ["metronidazole", "fluconazole", "augmentin", "amoxicillin", "doxycycline"]
+
+  escalation_signals:
+    icu:
+      slot: icu_eval_mentioned
+      en: ["ICU eval", "ICU transfer", "consider ICU"]
+      kr: ["중환자실", "ICU 평가"]
+      patterns:
+        - "(?i)ICU\\s*(eval|transfer|consult)"
+    transfer:
+      slot: transfer_consideration
+      en: ["transfer", "refer"]
+      kr: ["전원", "의뢰"]
+      patterns:
+        - "전원\\s*(고려|필요|예정)"
+    rapid_response:
+      slot: rapid_response
+      en: ["RRT", "rapid response", "code blue"]
+      kr: ["응급 호출"]
+    sepsis_bundle:
+      slot: sepsis_bundle_mentioned
+      en: ["sepsis bundle", "sepsis pathway"]
+      kr: ["패혈증 번들", "패혈증 프로토콜"]
+    vasopressor:
+      slot: vasopressor_mentioned
+      en: ["vasopressor", "norepinephrine", "dopamine", "levophed"]
+      kr: ["승압제"]
+      note: "MVP에서는 언급만 체크"
+
+  abx_class:
+    slot: abx_class_hint
+    broad: ["piperacillin-tazobactam", "meropenem", "imipenem", "ertapenem", "doripenem"]
+    narrow: ["amoxicillin", "ampicillin", "cephalexin", "trimethoprim"]
+    note: "MVP에서는 광범위(broad) 여부만 판정"
+
+  clinical_impression:
+    slot: clinical_impression
+    keywords:
+      en: ["impression", "clinical impression", "assessment"]
+      kr: ["임상 소견", "임상 인상"]
+    patterns:
+      - "(?i)(impression|assessment)\\s*:?"
+
+  clinical_concern:
+    patterns:
+      - "(?i)concern\\s*for\\s*(\\w+)"
+      - "(우려|의심).{0,5}(bacteremia|sepsis)"
+
+
+# ================================================================
+# SECTION 8: ORDERS (오더)
+# ================================================================
+orders:
+
+  culture_order:
+    slot: culture_ordered
+    keywords: ["blood culture", "urine culture", "sputum culture", "culture x2", "배양"]
+    patterns:
+      - "(?i)(blood|urine|sputum|stool|wound)\\s*(culture|Cx)"
+
+  imaging_order:
+    slot: imaging_ordered
+    keywords: ["CXR", "CT chest", "CT abdomen", "X-ray"]
+    patterns:
+      - "(?i)(CXR|chest\\s*X-?ray|CT\\s*(chest|abdomen))"
+
+  medication_order:
+    antibiotic: ["ceftriaxone", "piperacillin-tazobactam", "vancomycin", "meropenem", "ciprofloxacin", "levofloxacin", "doxycycline"]
+    fluid: ["NS bolus", "fluid resuscitation", "수액"]
+
+  isolation_order:
+    slot: isolation_required
+    keywords: ["contact isolation", "droplet precaution", "격리"]
+    patterns:
+      - "(?i)(contact|droplet|airborne)\\s*(isolation|precaution)"
+
+  new_orders:
+    slot: new_orders_count
+    keywords: ["new order", "order placed", "추가 처방"]
+    patterns:
+      - "(?i)new\\s*order"
+      - "추가\\s*처방"
+    note: "오더 건수 집계용"
+
+  monitoring_order:
+    slot: vitals_frequency
+    keywords: ["q2h vitals", "q4h vitals", "close monitoring", "continuous monitoring"]
+    patterns:
+      - "(?i)q\\s*([124])\\s*h\\s*vitals?"
+
+  time_first_seen:
+    slot: time_first_seen
+    note: "computed in Phase 6B trajectory — 각 에스컬레이션 이벤트의 최초 발생 시각 집계"
+
+  room_order:
+    slot: room_move_event
+    keywords: ["room move", "cohort", "병실 이동"]

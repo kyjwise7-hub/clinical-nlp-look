@@ -1,0 +1,807 @@
+# diff_rules.yaml
+# Diff Rules & Trajectory Events v1.4
+# ──────────────────────────────────────────────────────
+# 변경 이력:
+#   v1.2  2026-02-03
+#   v1.3  2026-02-10
+#   v1.4  2026-02-10  교차 검증 리뷰 반영
+#     - Axis B: culture_result.status → culture_status (스키마 통일, 값 positive/negative)
+#     - Axis B: temp_spike, wbc_rise, crp_rise 규칙 추가 (axis_spec diff_priority 3순위)
+#     - Axis C: vitals_frequency_escalated, prn_increase 규칙 추가 + 우선순위 재조정
+#     - Axis D: rapid_response, sepsis_bundle, vasopressor first_seen 규칙 추가
+#     - Axis F: symptom_cluster_match 주석 처리 (슬롯 미정의 → 파생 슬롯 시스템 후 복원)
+#     - unit_test_hints: temp_value, wbc_value, crp_value 추가
+#   v1.5  2026-02-20  호전 이벤트 확장
+#     - Axis A: cxr_severity_down 추가
+#     - Axis B: platelet_recover, temp_down, wbc_down, crp_down 추가
+#     - Axis F: pain_relief 추가
+# ──────────────────────────────────────────────────────
+# 사용처:
+#   - event_generator.py   → 스냅샷 비교 및 이벤트 추출
+#   - timeline_renderer.py → render_template 기반 UI 문구 생성
+#   - validator.py         → 수치 데이터 타입 및 임계값 검증
+# ──────────────────────────────────────────────────────
+
+version: '1.5'
+
+# ================================================================
+# SECTION 1: GLOBAL PRINCIPLES (이벤트 생성 원칙)
+# ================================================================
+# 가이드라인 5-1 준수
+# - 동일 Axis 내에서만 diff 비교 수행
+# - 의미 있는 slot 변화만 이벤트로 생성
+# - 우선순위: 이벤트(event) > 수치 변화(numeric) > 서술 변화(narrative)
+# - render_template은 UI 문구 생성 시 단일 진실 소스로 사용
+# ================================================================
+
+method: 'event-first; compare within same axis; compare meaningful slots only; priority:
+  event > numeric > narrative; render_text using templates'
+
+# ================================================================
+# SECTION 2: ENGINE CONFIGURATION (런타임 동작 정의)
+# ================================================================
+# - sorting: 여러 Axis 이벤트 동시 발생 시 리포트 정렬 기준
+# - validation: 수치 비교 룰 실행 전 타입 검증 및 실패 처리 정책
+# ================================================================
+
+engine:
+  sorting:
+    enabled: true
+    order:
+    - key: axis_priority_score
+      direction: desc
+    - key: rule_priority
+      direction: asc
+    - key: event_time
+      direction: desc
+    - key: event_type
+      direction: asc
+    axis_priority_source: axis_priority
+    default_axis_priority: 0
+    default_rule_priority: 999
+    missing_time_policy: last
+  validation:
+    enabled: true
+    numeric_coercion:
+      strategy: float
+      accept_int_float_str: true
+      strip_whitespace: true
+      reject_non_numeric: true
+    on_validation_fail: skip_rule
+    log_level: debug
+
+# ================================================================
+# SECTION 3: AXIS PRIORITY (축 간 전역 노출 우선순위)
+# ================================================================
+# - 여러 Axis에서 이벤트가 동시에 발생할 경우 리포트 상 노출 순서 제어
+# - 키는 반드시 axis 섹션 이름과 정확히 일치해야 함
+# ================================================================
+
+axis_priority:
+  axis_A_respiratory: 60
+  axis_D_escalation: 55
+  axis_B_infection_activity: 50
+  axis_C_clinical_action: 45
+  axis_E_infection_control: 40
+  axis_F_symptom_subjective: 30
+
+# ================================================================
+# SECTION 4: TEMPLATE ALIASES (PDF ↔ 스키마 변수 매핑)
+# ================================================================
+# - 문서(PDF) 표현과 실제 데이터 스키마 간 변수명 차이를 보정
+# - UI 렌더링 엔진에서 alias 치환 후 render_template 적용
+# ================================================================
+
+template_aliases:
+  device: o2_device
+
+# ================================================================
+# SECTION 5: UNIT TEST HINTS (테스트 가이드)
+# ================================================================
+# - 숫자 비교 룰에 대한 경계값/비정상 입력 테스트 권장 케이스
+# ================================================================
+
+unit_test_hints:
+  numeric_slots:
+  - pain_nrs_value
+  - platelet_value
+  - temp_value
+  - wbc_value
+  - crp_value
+  recommended_cases:
+    numeric_valid:
+    - '3'
+    - 3
+    - 3.5
+    numeric_invalid:
+    - null
+    - ''
+    - N/A
+    - severe
+    boundary_examples: Include cases around threshold (just below / equal / just above).
+
+# ================================================================
+# SECTION 6: AXIS DEFINITIONS (임상 축별 이벤트 규칙)
+# ================================================================
+# 각 Axis는 동일 축 내에서만 시계열 diff 비교를 수행하며,
+# rules.priority 값은 해당 Axis 내부에서의 우선순위를 의미함
+# ================================================================
+
+# ------------------------------------------------------------
+# axis_A_respiratory
+# ------------------------------------------------------------
+axis_A_respiratory:
+  rules:
+  - event_type: resp_support_increase
+    priority: 1
+    severity: high
+    if:
+      any:
+      - slot: resp_support_event
+        equals: increase
+      - slot: o2_flow_lpm
+        direction: up
+        threshold_abs: 1
+    render_template: 'Resp support increased: {o2_device} {o2_flow_prev}L → {o2_flow_new}L ({day})'
+    template_vars:
+    - o2_device
+    - o2_flow_prev
+    - o2_flow_new
+    - day
+  - event_type: o2_start_or_increase
+    priority: 2
+    severity: high
+    if:
+      any:
+      - slot: resp_support_event
+        equals: start
+      - slot: resp_support_event
+        equals: increase
+      - slot: o2_flow_lpm
+        direction: up
+        threshold_abs: 1
+    render_template: 'O2: {o2_device} {o2_flow_prev}L → {o2_flow_new}L ({day})'
+    template_vars:
+    - o2_device
+    - o2_flow_prev
+    - o2_flow_new
+    - day
+    template_note: PDF placeholder {device} is mapped to schema slot {o2_device} via
+      template_aliases.
+  - event_type: spo2_drop_same_o2
+    priority: 3
+    severity: medium
+    if:
+      slot: spo2_value
+      direction: down
+      condition: same_o2_if_possible
+    render_template: 'SpO2: {spo2_prev}% → {spo2_new}% (same O2) ({day})'
+    template_vars:
+    - spo2_prev
+    - spo2_new
+    - day
+  - event_type: resp_support_decrease
+    priority: 4
+    severity: low
+    if:
+      any:
+      - slot: resp_support_event
+        equals: decrease
+      - slot: resp_support_event
+        equals: stop
+      - slot: o2_flow_lpm
+        direction: down
+        threshold_abs: 1
+    render_template: 'Resp support decreased: {o2_device} {o2_flow_prev}L → {o2_flow_new}L ({day})'
+    template_vars:
+    - o2_device
+    - o2_flow_prev
+    - o2_flow_new
+    - day
+  - event_type: cxr_severity_up
+    priority: 5
+    severity: medium
+    if:
+      slot: cxr_severity
+      direction: up
+    render_template: 'CXR: {cxr_location} {cxr_lesion_type} {cxr_severity_prev} →
+      {cxr_severity_new} ({day})'
+    template_vars:
+    - cxr_location
+    - cxr_lesion_type
+    - cxr_severity_prev
+    - cxr_severity_new
+    - day
+  - event_type: cxr_severity_down
+    priority: 6
+    severity: low
+    if:
+      slot: cxr_severity
+      direction: down
+    render_template: 'CXR improved: {cxr_location} {cxr_lesion_type} {cxr_severity_prev}
+      → {cxr_severity_new} ({day})'
+    template_vars:
+    - cxr_location
+    - cxr_lesion_type
+    - cxr_severity_prev
+    - cxr_severity_new
+    - day
+
+# ------------------------------------------------------------
+# axis_B_infection_activity
+# ------------------------------------------------------------
+axis_B_infection_activity:
+  rules:
+  # Priority 1: 항생제 상향/변경/시작
+  - event_type: abx_escalation
+    priority: 1
+    severity: high
+    if:
+      any:
+      - slot: abx_event
+        equals: escalate
+      - slot: abx_event
+        equals: start
+    render_template: 'Antibiotics escalated: {abx_event} ({day})'
+    template_vars:
+    - abx_event
+    - day
+
+  # Priority 2: 레거시 호환 이벤트 (Alert Fusion 연계 유지)
+  - event_type: abx_escalate_or_change
+    priority: 2
+    severity: high
+    if:
+      any:
+      - slot: abx_event
+        equals: escalate
+      - slot: abx_event
+        equals: change
+      - slot: abx_event
+        equals: start
+    render_template: 'Antibiotics: {abx_event} ({day})'
+    template_vars:
+    - abx_event
+    - day
+
+  # Priority 3: 신규 배양 오더
+  - event_type: culture_ordered_new
+    priority: 3
+    severity: low
+    if:
+      slot: culture_ordered
+      new_item: true
+    render_template: 'Culture ordered: {culture_type} ({day})'
+    template_vars:
+    - culture_type
+    - day
+
+  # Priority 4: 혈역학 불안정 (저혈압 또는 MAP < 65)
+  - event_type: hemodynamic_instability
+    priority: 4
+    severity: critical
+    if:
+      any:
+      - slot: sbp_mmhg
+        lt: 90
+      - slot: map_mmhg
+        lt: 65
+    render_template: 'Hemodynamic instability: SBP {sbp_mmhg}, MAP {map_mmhg} ({day})'
+    template_vars:
+    - sbp_mmhg
+    - map_mmhg
+    - day
+
+  # Priority 5: 혈소판 급감
+  - event_type: platelet_drop
+    priority: 5
+    severity: medium
+    if:
+      slot: platelet_value
+      direction: down
+      threshold_abs: 30
+    render_template: 'Platelet: {plt_prev} → {plt_new} ({day})'
+    template_vars:
+    - plt_prev
+    - plt_new
+    - day
+
+  # Priority 6: 배양 결과 도착
+  - event_type: culture_result_arrived
+    priority: 6
+    severity: info
+    if:
+      slot: culture_status
+      in:
+      - positive
+      - negative
+      - no_growth
+    render_template: 'Culture result: {culture_result_text} ({day})'
+    template_vars:
+    - culture_result_text
+    - day
+
+  # Priority 7: 체온 상승
+  - event_type: temp_spike
+    priority: 7
+    severity: medium
+    if:
+      slot: temp_value
+      direction: up
+      threshold_abs: 0.5
+    render_template: 'Temp: {temp_prev}℃ → {temp_new}℃ ({day})'
+    template_vars:
+    - temp_prev
+    - temp_new
+    - day
+
+  # Priority 8: WBC 상승
+  - event_type: wbc_rise
+    priority: 8
+    severity: medium
+    if:
+      slot: wbc_value
+      direction: up
+      threshold_abs: 3.0
+    render_template: 'WBC: {wbc_prev} → {wbc_new} ({day})'
+    template_vars:
+    - wbc_prev
+    - wbc_new
+    - day
+
+  # Priority 9: CRP 상승
+  - event_type: crp_rise
+    priority: 9
+    severity: medium
+    if:
+      slot: crp_value
+      direction: up
+      threshold_abs: 3.0
+    render_template: 'CRP: {crp_prev} → {crp_new} ({day})'
+    template_vars:
+    - crp_prev
+    - crp_new
+    - day
+
+  # Priority 10: 48h 내 랩 악화 (WBC +20% 또는 CRP +50%)
+  - event_type: lab_worsening
+    priority: 10
+    severity: medium
+    if:
+      any:
+      - slot: wbc_value
+        direction: up
+        threshold_pct: 20
+        within_hours: 48
+      - slot: crp_value
+        direction: up
+        threshold_pct: 50
+        within_hours: 48
+    render_template: 'Lab worsening detected ({day})'
+    template_vars:
+    - day
+
+  # Priority 11: 혈역학 회복 (24h 내 SBP/MAP 정상화)
+  - event_type: hemodynamic_recovery
+    priority: 11
+    severity: low
+    if:
+      all:
+      - slot: sbp_mmhg
+        gte: 90
+        within_hours: 24
+      - slot: map_mmhg
+        gte: 65
+        within_hours: 24
+      - any:
+        - slot: sbp_mmhg
+          direction: up
+          threshold_abs: 10
+          within_hours: 24
+        - slot: map_mmhg
+          direction: up
+          threshold_abs: 5
+          within_hours: 24
+    render_template: 'Hemodynamic recovery: SBP {sbp_mmhg}, MAP {map_mmhg} ({day})'
+    template_vars:
+    - sbp_mmhg
+    - map_mmhg
+    - day
+
+  # Priority 12: 혈소판 회복
+  - event_type: platelet_recover
+    priority: 12
+    severity: low
+    if:
+      slot: platelet_value
+      direction: up
+      threshold_abs: 30
+    render_template: 'Platelet recovered: {platelet_prev} → {platelet_new} ({day})'
+    template_vars:
+    - platelet_prev
+    - platelet_new
+    - day
+
+  # Priority 13: 체온 하강
+  - event_type: temp_down
+    priority: 13
+    severity: low
+    if:
+      slot: temp_value
+      direction: down
+      threshold_abs: 0.5
+    render_template: 'Temp down: {temp_prev}℃ → {temp_new}℃ ({day})'
+    template_vars:
+    - temp_prev
+    - temp_new
+    - day
+
+  # Priority 14: WBC 하강
+  - event_type: wbc_down
+    priority: 14
+    severity: low
+    if:
+      slot: wbc_value
+      direction: down
+      threshold_abs: 3.0
+    render_template: 'WBC down: {wbc_prev} → {wbc_new} ({day})'
+    template_vars:
+    - wbc_prev
+    - wbc_new
+    - day
+
+  # Priority 15: CRP 하강
+  - event_type: crp_down
+    priority: 15
+    severity: low
+    if:
+      slot: crp_value
+      direction: down
+      threshold_abs: 3.0
+    render_template: 'CRP down: {crp_prev} → {crp_new} ({day})'
+    template_vars:
+    - crp_prev
+    - crp_new
+    - day
+
+  # Priority 16: 48h 내 랩 호전 (WBC -20% 또는 CRP -50%)
+  - event_type: lab_improving
+    priority: 16
+    severity: low
+    if:
+      any:
+      - slot: wbc_value
+        direction: down
+        threshold_pct: 20
+        within_hours: 48
+      - slot: crp_value
+        direction: down
+        threshold_pct: 50
+        within_hours: 48
+    render_template: 'Lab improving detected ({day})'
+    template_vars:
+    - day
+
+  # Priority 17: 항생제 감량
+  - event_type: abx_deescalation
+    priority: 17
+    severity: low
+    if:
+      slot: abx_event
+      equals: change
+    render_template: 'Antibiotics de-escalated ({day})'
+    template_vars:
+    - day
+
+  # Priority 18: 항생제 중단
+  - event_type: abx_discontinuation
+    priority: 18
+    severity: low
+    if:
+      slot: abx_event
+      equals: stop
+    render_template: 'Antibiotics stopped ({day})'
+    template_vars:
+    - day
+
+# ------------------------------------------------------------
+# axis_C_clinical_action
+# ------------------------------------------------------------
+# [FIX v1.4] axis_spec diff_priority 순서에 맞게 우선순위 재조정
+#   1: monitoring_level escalation
+#   2: vitals_frequency escalation (신규)
+#   3: notify_mentioned first_seen
+#   4: prn_interventions increase (신규)
+# ------------------------------------------------------------
+axis_C_clinical_action:
+  rules:
+  # Priority 1: 모니터링 수준 상향
+  - event_type: monitoring_escalated
+    priority: 1
+    severity: low
+    if:
+      any:
+      - slot: monitoring_level
+        direction: up
+      - slot: vitals_frequency
+        direction: up
+    render_template: 'Monitoring: {monitoring_prev} → {monitoring_new} ({day})'
+    template_vars:
+    - monitoring_prev
+    - monitoring_new
+    - day
+
+  # Priority 2: 활력징후 측정 빈도 상향
+  # [ADD v1.4] axis_spec diff_priority 1순위 (monitoring_level / vitals_frequency)
+  - event_type: vitals_frequency_escalated
+    priority: 2
+    severity: low
+    if:
+      slot: vitals_frequency
+      direction: up
+    render_template: 'Vitals freq: {freq_prev} → {freq_new} ({day})'
+    template_vars:
+    - freq_prev
+    - freq_new
+    - day
+
+  # Priority 3: 의사 notify 최초 언급
+  - event_type: notify_first_seen
+    priority: 3
+    severity: medium
+    if:
+      slot: notify_mentioned
+      equals: true
+      first_seen: true
+    render_template: 'Dr notify mentioned ({day})'
+    template_vars:
+    - day
+
+  # Priority 4: PRN 처치 항목 증가
+  # [ADD v1.4] axis_spec diff_priority 3순위 (prn_interventions increase)
+  - event_type: prn_increase
+    priority: 4
+    severity: low
+    if:
+      slot: prn_interventions
+      list_grew: true
+    render_template: 'PRN added: {new_prn_items} ({day})'
+    template_vars:
+    - new_prn_items
+    - day
+
+# ------------------------------------------------------------
+# axis_D_escalation (disabled; see axis_spec.yml enabled: false)
+# ------------------------------------------------------------
+# axis_D_escalation:
+#   rules:
+#   # Priority 1: ICU 평가 최초 언급
+#   - event_type: icu_eval_first_seen
+#     priority: 1
+#     if:
+#       slot: icu_eval_mentioned
+#       equals: true
+#       first_seen: true
+#     render_template: ICU eval mentioned ({day})
+#     template_vars:
+#     - day
+#
+#   # Priority 2: 전원 고려 최초 언급
+#   - event_type: transfer_considered_first_seen
+#     priority: 2
+#     if:
+#       slot: transfer_consideration
+#       equals: true
+#       first_seen: true
+#     render_template: Transfer considered ({day})
+#     template_vars:
+#     - day
+#
+#   # Priority 3: Rapid Response Team 호출
+#   # [ADD v1.4] axis_spec diff_priority 3순위 (rapid_response)
+#   - event_type: rrt_first_seen
+#     priority: 3
+#     if:
+#       slot: rapid_response
+#       equals: true
+#       first_seen: true
+#     render_template: Rapid Response Team called ({day})
+#     template_vars:
+#     - day
+#
+#   # Priority 4: 패혈증 번들 개시
+#   # [ADD v1.4] slot_definition.sepsis_bundle_mentioned 반영
+#   - event_type: sepsis_bundle_first_seen
+#     priority: 4
+#     if:
+#       slot: sepsis_bundle_mentioned
+#       equals: true
+#       first_seen: true
+#     render_template: Sepsis bundle initiated ({day})
+#     template_vars:
+#     - day
+#
+#   # Priority 5: 승압제 언급
+#   # [ADD v1.4] slot_definition.vasopressor_mentioned 반영
+#   - event_type: vasopressor_first_seen
+#     priority: 5
+#     if:
+#       slot: vasopressor_mentioned
+#       equals: true
+#       first_seen: true
+#     render_template: Vasopressor mentioned ({day})
+#     template_vars:
+#     - day
+
+# ------------------------------------------------------------
+# axis_E_infection_control
+# ------------------------------------------------------------
+axis_E_infection_control:
+  rules:
+  - event_type: new_mdro_detection
+    priority: 1
+    severity: high
+    if:
+      slot: mdro_status
+      equals: confirmed
+      first_seen: true
+    render_template: 'New MDRO detection: {mdro_flag} ({day})'
+    template_vars:
+    - mdro_flag
+    - day
+  - event_type: mdro_confirmed
+    priority: 2
+    severity: high
+    if:
+      slot: mdro_status
+      equals: confirmed
+    render_template: 'MDRO confirmed: {mdro_flag} ({day})'
+    template_vars:
+    - mdro_flag
+    - day
+  - event_type: isolation_gap
+    priority: 3
+    severity: high
+    if:
+      all:
+      - slot: isolation_required
+        not_equals: none
+      - slot: isolation_applied
+        equals: false
+    render_template: 'Isolation not applied (gap): {isolation_required} ({day})'
+    template_vars:
+    - isolation_required
+    - day
+  - event_type: isolation_applied
+    priority: 4
+    severity: low
+    if:
+      slot: isolation_applied
+      equals: true
+    render_template: 'Isolation applied: {isolation_required} ({day})'
+    template_vars:
+    - isolation_required
+    - day
+  - event_type: cluster_suspected
+    priority: 5
+    severity: medium
+    if:
+      slot: cluster_suspected
+      equals: true
+    render_template: 'Cluster suspected: {cluster_reason} ({day})'
+    template_vars:
+    - cluster_reason
+    - day
+
+# ------------------------------------------------------------
+# axis_F_symptom_subjective
+# ------------------------------------------------------------
+# 이미지 기준 우선순위:
+#   1: mental_status_change   (이벤트 — altered_mentation == true)
+#   2: pain_escalation        (수치 — NRS delta >= 2)
+#   3: pain_relief            (수치 — NRS delta <= -2)
+#   4: new_symptom_detected   (이벤트 — unknown/false → true 전환)
+#   5: pain_location_change   (서술 — pain_location_hint 변경)
+#   6: symptom_cluster_match  (서술 — 복합 양상) ← 주석 처리
+# ------------------------------------------------------------
+axis_F_symptom_subjective:
+  rules:
+  # Priority 1: 의식 상태 변화 (이벤트 - 최상위 임상 지표)
+  - event_type: mental_status_change
+    priority: 1
+    severity: high
+    if:
+      slot: altered_mentation
+      from: [unknown, false]
+      to: true
+    render_template: 'Alert: Altered Mentation detected ({day})'
+    template_vars:
+    - day
+
+  # Priority 2: 통증 점수 급상승 (수치 - 2점 이상 상승 임계치 적용)
+  - event_type: pain_escalation
+    priority: 2
+    severity: medium
+    if:
+      slot: pain_nrs_value
+      delta_gte: 1
+      require_both: true
+    render_template: 'Pain Escalated: {prev} → {new} ({location}) ({day})'
+    template_vars:
+    - prev
+    - new
+    - location
+    - day
+    validate:
+      numeric_slots:
+      - pain_nrs_value
+      coerce: float
+      require_prev_new: true
+      on_fail: skip
+
+  # Priority 3: 통증 감소 (수치 - 2점 이상 하강)
+  - event_type: pain_relief
+    priority: 3
+    severity: low
+    if:
+      slot: pain_nrs_value
+      direction: down
+      threshold_abs: 1
+    render_template: 'Pain Relief: {prev} → {new} ({location}) ({day})'
+    template_vars:
+    - prev
+    - new
+    - location
+    - day
+    validate:
+      numeric_slots:
+      - pain_nrs_value
+      coerce: float
+      require_prev_new: true
+      on_fail: skip
+
+  # Priority 4: 신규 증상 발생 (이벤트 - unknown/false에서 전환)
+  - event_type: new_symptom_detected
+    priority: 4
+    severity: medium
+    if:
+      any:
+      - slot: nausea_vomiting
+        from: [unknown, false]
+        to: true
+      - slot: diarrhea
+        from: [unknown, false]
+        to: true
+    render_template: 'New Symptom: {symptom_name} ({day})'
+    template_vars:
+    - symptom_name
+    - day
+
+  # Priority 5: 통증 부위 변경 (서술/속성 - 단순 위치 이동)
+  - event_type: pain_location_change
+    priority: 5
+    severity: info
+    if:
+      slot: pain_location_hint
+      changed: true
+      not_from: unknown  # 데이터 공백에서의 첫 발생은 신규 증상으로 간주
+      require_both: true
+    render_template: 'Pain Migrated: {prev_loc} → {new_loc} ({day})'
+    template_vars:
+    - prev_loc
+    - new_loc
+    - day
+
+  # Priority 6: 증후군 패턴 매칭 (서술 - 복합 양상)
+  # [DISABLED v1.4] symptom_cluster_flag 슬롯이 slot_definition에 미정의
+  # → 파생 슬롯 시스템 설계 후 복원 예정 (diarrhea + nausea + fever → GI cluster 등)
+  # - event_type: symptom_cluster_match
+  #   priority: 5
+  #   if:
+  #     slot: symptom_cluster_flag
+  #     changed: true
+  #     not_equals: unknown
+  #   render_template: 'Syndrome: {cluster_name} patterns ({day})'
+  #   template_vars:
+  #   - cluster_name
+  #   - day

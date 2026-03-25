@@ -1,0 +1,516 @@
+version: 1.2.2
+principles:
+  doc_authority:
+    physician_note:
+      diagnosis_allowed: true
+      clinical_judgement_allowed: true
+    nursing_note:
+      diagnosis_allowed: false
+      clinical_judgement_allowed: false
+      allowed:
+        - observation
+        - interventions
+        - notify
+        - subjective_symptoms # v1.2: 주관적 증상(통증, 호소 등) 기록 허용
+    radiology_cxr:
+      diagnosis_allowed: false
+      clinical_judgement_allowed: false
+      allowed:
+        - imaging_findings
+        - optional_comparison
+    microbiology:
+      facts_allowed:
+        - organism
+        - AST
+        - collection_time
+        - result_time
+    labs_orders:
+      facts_allowed:
+        - numeric_results
+        - orders
+        - timestamps
+  separate_clinical_vs_ic:
+    axes_A_to_D_and_F: clinical_trajectory (patient course)
+    axis_E: infection_control_operational_event_stream (ward operations)
+  front_display_rule:
+    avoid_words:
+      - 악화
+      - 호전
+      - 진단 확정
+      - confirmed pneumonia
+    display: change-log events with evidence, leave judgement to clinicians
+
+snapshot_aggregation:
+  notes:
+    - Keep upper pipeline unchanged; use currently extracted slots only.
+    - Derive aliases in 6A where needed (e.g., sbp_mmhg, map_mmhg).
+  vital_signs:
+    strategy: latest_value_wins
+  labs:
+    strategy: latest_value_wins
+  medications:
+    strategy: abx_event_state_transition
+    fallback_note: abx_name/abx_route/abx_start_date are not available in current pipeline.
+  infection_control:
+    strategy: isolation_strength_priority
+    priority_order: [airborne, contact, droplet, enteric, none, unknown]
+
+axes:
+  A_respiratory:
+    axis_id: respiratory
+    goal: Show objective respiratory change logs (O2/SpO2/CXR) without making clinical judgement.
+    primary_sources:
+      - nursing_note
+      - radiology_cxr
+    secondary_sources:
+      - physician_note
+    snapshot_slots:
+      spo2_value:
+        type: integer
+        unit: '%'
+        nullable: true
+      rr_value:
+        type: integer
+        unit: breaths/min
+        nullable: true
+      o2_device:
+        type: enum
+        values: [RA, NC, VM, SM, NRM, HFNC, unknown]
+        nullable: true
+      o2_flow_lpm:
+        type: number
+        unit: L/min
+        nullable: true
+      dyspnea:
+        type: tri_bool
+        nullable: true
+      work_of_breathing:
+        type: enum
+        values: [none, mild, moderate, severe, unknown]
+        nullable: true
+      cxr_lesion_type:
+        type: array_enum
+        values: [opacity, consolidation, infiltration, effusion, atelectasis, edema, hazy, ground_glass, nodule, mass, unknown]
+        nullable: true
+      cxr_location:
+        type: array_enum
+        values: [RUL, RML, RLL, LUL, LLL, bilateral, diffuse, perihilar, basal, apical, unknown]
+        nullable: true
+      cxr_extent:
+        type: enum
+        values: [focal, patchy, multifocal, diffuse, unknown]
+        nullable: true
+      cxr_severity:
+        type: enum
+        values: [normal, minimal, mild, moderate, severe, unknown]
+        nullable: true
+      resp_support_event:
+        type: enum
+        values: [start, increase, decrease, stop, none, unknown]
+        nullable: true
+      breath_sounds:
+        type: string
+        nullable: true
+      sputum_character:
+        type: string
+        nullable: true
+      cxr_change_direction:
+        type: enum
+        values: [worsening, improving, stable, unknown]
+        nullable: true
+    diff_priority:
+      - resp_support_event
+      - spo2_value (conditioned_on_same_o2_if_possible)
+      - cxr_severity/cxr_extent
+      - dyspnea/work_of_breathing
+
+  B_infection_activity:
+    axis_id: infection_activity
+    goal: Track infection/hemodynamic activity via trends and concrete events (labs/cultures/antibiotics).
+    primary_sources:
+      - labs
+      - orders
+      - microbiology
+      - physician_note
+    snapshot_slots:
+      sbp_mmhg:
+        type: number
+        unit: mmHg
+        nullable: true
+      dbp_mmhg:
+        type: number
+        unit: mmHg
+        nullable: true
+      hr_bpm:
+        type: number
+        unit: bpm
+        nullable: true
+      map_mmhg:
+        type: number
+        unit: mmHg
+        nullable: true
+      bp_sys:
+        type: number
+        unit: mmHg
+        nullable: true
+      bp_dia:
+        type: number
+        unit: mmHg
+        nullable: true
+      hr_value:
+        type: number
+        unit: bpm
+        nullable: true
+      temp_value:
+        type: number
+        unit: C
+        nullable: true
+      wbc_value:
+        type: number
+        unit: 10^3/uL
+        nullable: true
+      crp_value:
+        type: number
+        unit: mg/dL
+        nullable: true
+      platelet_value:
+        type: number
+        unit: 10^3/uL
+        nullable: true
+      ast_value:
+        type: number
+        unit: U/L
+        nullable: true
+      alt_value:
+        type: number
+        unit: U/L
+        nullable: true
+      creatinine_value:
+        type: number
+        unit: mg/dL
+        nullable: true
+      lactate_value: # v1.2 추가
+        type: number
+        unit: mmol/L
+        nullable: true
+      culture_ordered:
+        type: array_enum
+        values: [blood, urine, stool, sputum, wound]
+        nullable: true
+      culture_result:
+        type: object
+        nullable: true
+        schema:
+          status: [pos, neg, no_growth, pending, preliminary, contaminated, unknown]
+          organism: string_or_null
+      abx_event:
+        type: enum
+        values: [start, change, escalate, deescalate, stop, none, unknown]
+        nullable: true
+      abx_class_hint:
+        type: enum
+        values: [broad, narrow, unknown]
+        nullable: true
+      procalcitonin_value:
+        type: number
+        unit: ng/mL
+        nullable: true
+      colony_count:
+        type: string
+        nullable: true
+      susceptibility_list:
+        type: array_object
+        nullable: true
+        schema:
+          antibiotic: string
+          mic: string
+          interpretation: enum [S, I, R]
+      resistance_detected:
+        type: array_text
+        nullable: true
+    diff_priority:
+      - abx_event (escalate/start/change)
+      - culture_ordered (new)
+      - temp/wbc/crp/platelet trends
+      - culture_result arrival (pos/neg)
+
+  C_clinical_action:
+    axis_id: clinical_action
+    goal: 'Reflect workload/intensity: notify, PRN interventions, monitoring frequency.'
+    primary_sources:
+      - nursing_note
+      - orders
+    snapshot_slots:
+      notify_mentioned:
+        type: bool
+        nullable: true
+      prn_interventions:
+        type: array_enum
+        values: [neb, suction, antipyretic, iv_fluid, antiemetic, antidiarrheal, analgesic, oxygen_prn, unknown]
+        nullable: true
+      monitoring_level:
+        type: enum
+        values: [standard, enhanced, intensive, unknown]
+        nullable: true
+      vitals_frequency:
+        type: enum
+        values: [q8h, q6h, q4h, q2h, continuous, unknown]
+        nullable: true
+      new_orders_count:
+        type: integer
+        nullable: true
+      intake_output_monitoring: # v1.2 추가
+        type: tri_bool
+        nullable: true
+    diff_priority:
+      - monitoring_level / vitals_frequency escalation
+      - notify_mentioned first_seen
+      - prn_interventions increase
+      - new_orders_count increase
+
+  D_escalation:
+    axis_id: escalation
+    enabled: false
+    goal: 'Binary + timing signals: ICU eval / transfer consideration / RRT.'
+    primary_sources:
+      - physician_note
+      - orders
+      - nursing_note
+    snapshot_slots:
+      icu_eval_mentioned:
+        type: bool
+        nullable: true
+      transfer_consideration:
+        type: bool
+        nullable: true
+      rapid_response:
+        type: bool
+        nullable: true
+      sepsis_bundle_mentioned:
+        type: tri_bool
+        nullable: true
+      vasopressor_mentioned:
+        type: tri_bool
+        nullable: true
+      time_first_seen:
+        type: object
+        nullable: true
+    diff_priority:
+      - icu_eval_mentioned
+      - transfer_consideration
+      - rapid_response
+
+  E_infection_control:
+    axis_id: infection_control
+    goal: 'Operational infection control stream: MDRO/isolation/cohort/cluster.'
+    primary_sources:
+      - microbiology
+      - orders
+      - nursing_note
+    event_stream: true
+    event_slots:
+      mdro_flag:
+        type: enum
+        values: [MRSA, VRE, CRE, CPE, ESBL, VRSA, Carbapenemase, MDRO_unspecified, none, unknown]
+      mdro_type:
+        type: enum
+        values: [MRSA, VRE, CRE, CPE, ESBL, VRSA, Carbapenemase, MDRO_unspecified, none, unknown]
+      mdro_status:
+        type: enum
+        values: [suspected, confirmed, cleared, unknown]
+      specimen_type:
+        type: enum
+        values: [blood, urine, stool, sputum, wound, unknown]
+      organism:
+        type: string_or_null
+      collection_time:
+        type: datetime_or_null
+      result_time:
+        type: datetime_or_null
+      isolation_required:
+        type: enum
+        values: [none, contact, droplet, airborne, enteric, unknown]
+      isolation_type:
+        type: enum
+        values: [none, contact, droplet, airborne, enteric, unknown]
+      isolation_applied:
+        type: tri_bool
+      isolation_start_time:
+        type: datetime_or_null
+      isolation_end_time:
+        type: datetime_or_null
+      cohort_key:
+        type: string_or_null
+      room_move_event:
+        type: enum
+        values: [moved_to_single, moved_to_cohort, none, unknown]
+      cluster_suspected:
+        type: tri_bool
+      cluster_evidence:
+        type: object_or_null
+      contact_trace:
+        type: tri_bool
+        nullable: true
+      gram_stain:
+        type: string
+        nullable: true
+    watch_kpis:
+      - new_mdro_confirmed_within_72h
+      - isolation_gap
+      - cluster_suspected_active
+
+  F_symptom_subjective: # v1.2 신규 축 추가
+    axis_id: symptom_subjective
+    goal: Track subjective patterns like pain, GI symptoms, and mental status changes.
+    implementation_note: Antibiotics trajectory is handled in axis_B using abx_event (fallback mode).
+    primary_sources:
+      - nursing_note
+    snapshot_slots:
+      pain_nrs_value:
+        type: integer
+        range: [0, 10]
+        nullable: true
+      pain_location_hint:
+        type: enum
+        values: [abdomen, flank, back, chest, head, suprapubic, epigastric, extremity, generalized, unknown]
+        nullable: true
+      nausea_vomiting:
+        type: tri_bool
+        nullable: true
+      diarrhea:
+        type: tri_bool
+        nullable: true
+      altered_mentation:
+        type: tri_bool
+        nullable: true
+      foley_catheter:
+        type: bool
+        nullable: true
+      tick_eschar:
+        type: bool
+        nullable: true
+      tick_exposure:
+        type: bool
+        nullable: true
+    diff_priority:
+      - pain_nrs_value (escalation >= 2)
+      - new_symptom_detected (nausea_vomiting or diarrhea)
+      - altered_mentation_occurrence
+      - symptom_cluster_match
+
+  supplementary_vitals:
+    description: 'Axis에 직접 배정되지 않지만 Snapshot에 포함되는 바이탈/검사 보조 데이터'
+    snapshot_slots:
+      hr_value:
+        type: integer
+        unit: bpm
+        nullable: true
+      rr_value:
+        type: integer
+        unit: breaths/min
+        nullable: true
+      bp_sys:
+        type: integer
+        unit: mmHg
+        nullable: true
+      bp_dia:
+        type: integer
+        unit: mmHg
+        nullable: true
+      hgb_value:
+        type: number
+        unit: g/dL
+        nullable: true
+      bun_value:
+        type: number
+        unit: mg/dL
+        nullable: true
+      na_value:
+        type: number
+        unit: mEq/L
+        nullable: true
+      k_value:
+        type: number
+        unit: mEq/L
+        nullable: true
+      glucose_value:
+        type: number
+        unit: mg/dL
+        nullable: true
+
+ui_contract:
+  watch:
+    filters:
+      - high_clinical_risk
+      - new_mdro
+      - isolation_gap
+      - cluster_suspected
+    sort_priority:
+      - ic_risk_state priority_order
+      - clinical_risk_state (needs_attention > mixed > stable)
+      - isolation_gap
+      - cluster_suspected
+      - resp_support_event in {start,increase}
+      - abx_event in {escalate,start,change}
+      - most_recent_event_time
+  explain:
+    show:
+      - trajectory_events_A_to_D_and_F # F 추가
+      - infection_control_events_E_as_separate_lane
+    rule: Display change logs; avoid explicit 'worsening/improving' wording.
+  act:
+    triggers:
+      axis_D:
+        - ICU eval/transfer checklist
+      axis_E_isolation_gap:
+        - isolation type guidance + room/cohort suggestion
+      axis_E_cluster:
+        - cluster evidence + recommended checks/actions
+
+risk_states:
+  patient_clinical_risk:
+    field: clinical_risk_state
+    enum:
+      - stable
+      - mixed
+      - needs_attention
+    definition: Internal-only aggregation of Axis A-D, F events for Watch sorting and alerting.
+    rules:
+      stable:
+        - No high-priority clinical events in last 24h (Axis A-D, F).
+      mixed:
+        - Some clinical signal(s) present but without strong triggers for needs_attention.
+      needs_attention:
+        - 'Any of: O2 start/increase (Axis A), ABX escalate/change/start + notify mentioned (Axis B + C), ICU eval/transfer/RRT first seen (Axis D), New symptom cluster match (Axis F).'
+    recommended_windows:
+      event_window_hours: 24
+      trend_window_hours: 48
+
+  infection_control_risk:
+    field: ic_risk_state
+    enum:
+      - ok
+      - isolation_gap
+      - cluster_suspected
+      - new_mdro
+    definition: Internal-only infection control operational risk derived from Axis E.
+    rules:
+      ok:
+        - No active MDRO confirmed within 72h.
+        - No isolation gap.
+      new_mdro:
+        - MDRO confirmed event occurred within 72h.
+      isolation_gap:
+        - isolation_required != none AND (isolation_applied == false OR application delayed beyond threshold).
+      cluster_suspected:
+        - cluster_suspected == true with evidence.
+    recommended_windows:
+      new_mdro_window_hours: 72
+      cluster_window_hours: 48
+    thresholds:
+      isolation_delay_threshold_minutes: 120
+    priority_order:
+      - isolation_gap
+      - cluster_suspected
+      - new_mdro
+      - ok

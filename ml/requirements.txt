@@ -1,0 +1,25 @@
+# ml-sepsis requirements
+# pip install -r requirements.txt
+
+# === 데이터 처리 ===
+pandas>=2.0
+numpy>=1.24
+duckdb>=0.10
+
+# === 시각화 ===
+matplotlib>=3.7
+seaborn>=0.12
+
+# === ML ===
+scikit-learn>=1.3
+xgboost>=2.0
+lightgbm>=4.0
+shap>=0.43
+
+# === 노트북 ===
+jupyter>=1.0
+tqdm>=4.65
+ipywidgets>=8.0
+
+# === API ===
+flask>=3.0
