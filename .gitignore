@@ -1,3 +1,29 @@
+# ================================================
+# 포트폴리오 공개 범위
+# 공개: ml/, nlp/, data/scripts/, docs/, README.md
+# 나머지 전체 제외
+# ================================================
+
+# 팀 공동 작업 파일 (Frontend / Backend / RAG / Deploy)
+frontend/
+backend/
+rag/
+deployment/
+emr-generator/
+
+# HTML 프로토타입
+*.html
+
+# 루트 requirements (팀 전체용)
+/requirements.txt
+
+# src/ (업로드 예정 플레이스홀더)
+src/
+
+# 데이터 폴더 — data/scripts/ 만 공개
+data/outputs/
+data/data_description.md
+
 # 환자 데이터 보안
 *.csv
 *.parquet
@@ -13,7 +39,12 @@ __pycache__/
 *.egg-info/
 venv/
 .env
+.env.*
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Node
+node_modules/
+package-lock.json
